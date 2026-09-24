@@ -19,11 +19,12 @@ Only one manager runs per server folder: starting it again brings the existing w
 
 ## Screenshots
 
-<!-- Add your own captures here, for example:
-     ![Server tab](docs/img/server.png)
-     ![Character editor](docs/img/characters.png)
-     ![Modules](docs/img/modules.png)
--->
+![Server tab](docs/img/server.png)
+![Update](docs/img/update.png)
+![Modules](docs/img/modules.png)
+![Character editor](docs/img/characters.png)
+![GM_commands](docs/img/gm_commands.png)
+
 
 ---
 
