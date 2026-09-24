@@ -1,0 +1,93 @@
+AzerothCore Server Manager - Licence
+Copyright (c) 2026 Chris (project author). All rights reserved.
+
+This is not open-source software. The terms below grant limited permission
+to use the software; everything not expressly permitted requires the written
+consent of the author.
+
+1. Permitted use
+   You may install and run this software, privately and commercially, on any
+   number of computers, and you may make backup copies for your own use.
+
+2. Redistribution
+   You may pass on the software only unchanged, complete, free of charge and
+   with this licence file included. You may not sell it, offer it as part of
+   a paid product or service, or publish it under your own name.
+
+3. Modification
+   You may modify the software for your own use. Publishing or passing on a
+   modified version - in whole or in part, as source code or in compiled
+   form - requires the prior written consent of the author.
+
+4. Attribution
+   Copyright notices, the version marker and this licence file must remain
+   intact in every copy.
+
+5. Third-party software
+   This licence covers only the files of this project. AzerothCore, MySQL,
+   Boost, CMake, OpenSSL, the game client data and every server module remain
+   under the terms of their respective authors. See THIRD-PARTY.md.
+
+6. Warranty and liability
+   The software is provided "as is", without warranty of any kind, express or
+   implied, including but not limited to warranties of merchantability,
+   fitness for a particular purpose and non-infringement. In no event shall
+   the author be liable for any claim, damages or other liability arising
+   from the software or its use. This applies in particular to data loss on
+   game databases operated with this tool.
+
+7. Termination
+   Any breach of these terms ends the permissions granted here immediately.
+
+Requests for permission under sections 2 and 3: open an issue in the project
+repository or contact the author directly.
+
+
+--------------------------------------------------------------------------
+Deutsche Fassung (die englische Fassung ist massgeblich)
+--------------------------------------------------------------------------
+
+AzerothCore Server Manager - Lizenz
+Copyright (c) 2026 Chris (Autor des Projekts). Alle Rechte vorbehalten.
+
+Dies ist keine quelloffene Software. Die folgenden Bedingungen erlauben die
+Nutzung; alles, was nicht ausdruecklich erlaubt ist, bedarf der schriftlichen
+Zustimmung des Autors.
+
+1. Erlaubte Nutzung
+   Du darfst diese Software privat und gewerblich auf beliebig vielen
+   Rechnern installieren und ausfuehren und Sicherungskopien anlegen.
+
+2. Weitergabe
+   Die Weitergabe ist nur unveraendert, vollstaendig, unentgeltlich und mit
+   dieser Lizenzdatei erlaubt. Verkauf, Beigabe zu einem kostenpflichtigen
+   Produkt oder Dienst sowie Veroeffentlichung unter eigenem Namen sind nicht
+   gestattet.
+
+3. Veraenderung
+   Du darfst die Software fuer den eigenen Gebrauch veraendern. Die
+   Veroeffentlichung oder Weitergabe einer veraenderten Fassung - ganz oder
+   teilweise, als Quelltext oder in uebersetzter Form - bedarf der vorherigen
+   schriftlichen Zustimmung des Autors.
+
+4. Namensnennung
+   Urheberrechtshinweise, die Versionsangabe und diese Lizenzdatei muessen in
+   jeder Kopie erhalten bleiben.
+
+5. Fremde Software
+   Diese Lizenz gilt nur fuer die Dateien dieses Projekts. AzerothCore, MySQL,
+   Boost, CMake, OpenSSL, die Client-Daten und saemtliche Server-Module
+   unterliegen den Bedingungen ihrer jeweiligen Urheber. Siehe THIRD-PARTY.md.
+
+6. Gewaehrleistung und Haftung
+   Die Software wird ohne jede Gewaehrleistung bereitgestellt, weder
+   ausdruecklich noch stillschweigend. Der Autor haftet nicht fuer Schaeden,
+   die aus der Nutzung entstehen - insbesondere nicht fuer Datenverluste an
+   Spieldatenbanken, die mit diesem Werkzeug betrieben werden.
+
+7. Erloeschen
+   Bei einem Verstoss gegen diese Bedingungen erloeschen die hier erteilten
+   Rechte mit sofortiger Wirkung.
+
+Anfragen zu Punkt 2 und 3: im Projekt-Repository ein Issue eroeffnen oder den
+Autor direkt kontaktieren.

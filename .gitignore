@@ -1,0 +1,16 @@
+# nothing from a live server belongs in the repository
+ac-settings.json
+.manager-pid
+logs/
+build/
+source/
+mysql/
+deps/
+data/
+
+# Windows / editors
+Thumbs.db
+desktop.ini
+*.swp
+.vscode/
+.idea/
