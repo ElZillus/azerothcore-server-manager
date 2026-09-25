@@ -3,7 +3,7 @@
 #  Wird von AC.Common.ps1 geladen.
 # =====================================================================
 
-$script:AcCharVersion = '2026-09-06.94'
+$script:AcCharVersion = '2026-09-06.98'
 
 # --- Ausruestungsplaetze (Slot-Nummer wie in character_inventory, bag = 0) ---
 #     Inv = passende InventoryType-Werte aus item_template
@@ -1345,4 +1345,248 @@ function Add-AcCharacterInventory {
         catch { Write-AcLog (T 'chr.mailFailed' @($_.Exception.Message)) 'WARN'; $failed += $overflow.Count }
     }
     return @{ Placed = $placed; Mailed = $mailed; Failed = $failed }
+}
+
+# ---------------------------------------------------------------------
+#  Gegenstands-Editor (acore_world.item_template)
+#
+#  Bearbeitet werden die 30 Felder, die in der Praxis zaehlen. Jede Aenderung
+#  wird zusaetzlich als SQL gesichert: ein Update der Weltdatenbank setzt
+#  item_template sonst zurueck und alle Anpassungen waeren verloren.
+# ---------------------------------------------------------------------
+
+$script:AcItemCustomStart = 100000   # eigene Gegenstaende ab hier, weit weg von Blizzard-IDs
+
+# Reihenfolge = Reihenfolge im Editor. Group dient nur der Gliederung.
+$script:AcItemFields = @(
+    @{ Key = 'name';           Group = 'basic';  Type = 'text' }
+    @{ Key = 'description';    Group = 'basic';  Type = 'text' }
+    @{ Key = 'Quality';        Group = 'basic';  Type = 'enum'; Hint = 'quality' }
+    @{ Key = 'ItemLevel';      Group = 'basic';  Type = 'int' }
+    @{ Key = 'RequiredLevel';  Group = 'basic';  Type = 'int' }
+    @{ Key = 'class';          Group = 'basic';  Type = 'enum'; Hint = 'class' }
+    @{ Key = 'subclass';       Group = 'basic';  Type = 'int';  Hint = 'subclass' }
+    @{ Key = 'InventoryType';  Group = 'basic';  Type = 'enum'; Hint = 'invtype' }
+    @{ Key = 'displayid';      Group = 'basic';  Type = 'int';  Hint = 'display' }
+    @{ Key = 'bonding';        Group = 'basic';  Type = 'enum'; Hint = 'bonding' }
+    @{ Key = 'stackable';      Group = 'basic';  Type = 'int' }
+    @{ Key = 'BuyPrice';       Group = 'basic';  Type = 'int' }
+    @{ Key = 'SellPrice';      Group = 'basic';  Type = 'int' }
+    @{ Key = 'MaxDurability';  Group = 'basic';  Type = 'int' }
+    @{ Key = 'armor';          Group = 'combat'; Type = 'int' }
+    @{ Key = 'dmg_min1';       Group = 'combat'; Type = 'int' }
+    @{ Key = 'dmg_max1';       Group = 'combat'; Type = 'int' }
+    @{ Key = 'dmg_type1';      Group = 'combat'; Type = 'enum'; Hint = 'dmgtype' }
+    @{ Key = 'delay';          Group = 'combat'; Type = 'int';  Hint = 'delay' }
+    @{ Key = 'stat_type1';     Group = 'stats';  Type = 'enum'; Hint = 'stat' }
+    @{ Key = 'stat_value1';    Group = 'stats';  Type = 'int' }
+    @{ Key = 'stat_type2';     Group = 'stats';  Type = 'enum'; Hint = 'stat' }
+    @{ Key = 'stat_value2';    Group = 'stats';  Type = 'int' }
+    @{ Key = 'stat_type3';     Group = 'stats';  Type = 'enum'; Hint = 'stat' }
+    @{ Key = 'stat_value3';    Group = 'stats';  Type = 'int' }
+    @{ Key = 'stat_type4';     Group = 'stats';  Type = 'enum'; Hint = 'stat' }
+    @{ Key = 'stat_value4';    Group = 'stats';  Type = 'int' }
+    @{ Key = 'spellid_1';      Group = 'spell';  Type = 'int';  Hint = 'spellid' }
+    @{ Key = 'spelltrigger_1'; Group = 'spell';  Type = 'enum'; Hint = 'trigger' }
+    @{ Key = 'spellid_2';      Group = 'spell';  Type = 'int';  Hint = 'spellid' }
+    @{ Key = 'spelltrigger_2'; Group = 'spell';  Type = 'enum'; Hint = 'trigger' }
+)
+
+function Get-AcItemFieldNames { return @($script:AcItemFields | ForEach-Object { [string]$_.Key }) }
+
+function Find-AcItems {
+    <#
+      Sucht Gegenstaende nach Name oder Nummer. Leere Suche liefert die zuletzt
+      angelegten eigenen Gegenstaende - das ist beim Arbeiten am nuetzlichsten.
+    #>
+    param($Paths, [string]$Search = '', [int]$Limit = 200)
+    $s = ConvertTo-AcSqlString ([string]$Search).Trim()
+    $where = ''
+    if ($s -match '^\d+$') {
+        $where = "WHERE entry = $s OR name LIKE '%$s%'"
+    } elseif ($s) {
+        $where = "WHERE name LIKE '%$s%'"
+    } else {
+        $where = "WHERE entry >= $($script:AcItemCustomStart)"
+    }
+    $sql = @"
+SELECT entry AS itemId, name AS itemName, Quality AS itemQuality,
+       ItemLevel AS itemLevel, class AS itemClass, InventoryType AS invType
+FROM acore_world.item_template
+$where
+ORDER BY entry DESC
+LIMIT $Limit;
+"@
+    $rows = @(Invoke-AcMySqlQuery $Paths $sql 'acore_world')
+    $list = @()
+    foreach ($r in $rows) {
+        $list += ,@{
+            Entry     = [int]([string]$r.itemId)
+            Name      = [string]$r.itemName
+            Quality   = [int]([string]$r.itemQuality)
+            ItemLevel = [int]([string]$r.itemLevel)
+            Class     = [int]([string]$r.itemClass)
+            InvType   = [int]([string]$r.invType)
+        }
+    }
+    return $list
+}
+
+function Get-AcItem {
+    # Alle bearbeitbaren Felder eines Gegenstands
+    param($Paths, [int]$Entry)
+    $cols = (Get-AcItemFieldNames | ForEach-Object { '`' + $_ + '`' }) -join ', '
+    $rows = @(Invoke-AcMySqlQuery $Paths "SELECT $cols FROM acore_world.item_template WHERE entry = $Entry;" 'acore_world')
+    if ($rows.Count -eq 0) { return $null }
+    $r = $rows[0]
+    $out = @{}
+    foreach ($f in (Get-AcItemFieldNames)) { $out[$f] = [string]$r.$f }
+    return $out
+}
+
+function Save-AcItem {
+    <#
+      Schreibt die geaenderten Felder zurueck. Spaltennamen in Backticks, weil
+      item_template Namen wie "class" oder "delay" enthaelt.
+    #>
+    param($Paths, [int]$Entry, [hashtable]$Fields)
+    $sets = @()
+    foreach ($f in $script:AcItemFields) {
+        $k = [string]$f.Key
+        if (-not $Fields.ContainsKey($k)) { continue }
+        $v = [string]$Fields[$k]
+        if ($f.Type -eq 'text') {
+            $sets += ('`{0}` = ''{1}''' -f $k, (ConvertTo-AcSqlString $v))
+        } else {
+            $n = 0
+            if ($v -match '^-?\d+$') { $n = [int]$v }
+            $sets += ('`{0}` = {1}' -f $k, $n)
+        }
+    }
+    if ($sets.Count -eq 0) { return 0 }
+    Invoke-AcMySqlExec $Paths ("UPDATE acore_world.item_template SET " + ($sets -join ', ') + " WHERE entry = $Entry;") 'acore_world'
+    Write-AcLog (T 'item.saved' @($Entry, $sets.Count))
+    Register-AcItemEdit $Paths $Entry
+    return $sets.Count
+}
+
+function Get-AcNextItemEntry {
+    # naechste freie Nummer im eigenen Bereich
+    param($Paths)
+    $sql = "SELECT IFNULL(MAX(entry), $($script:AcItemCustomStart) - 1) + 1 AS nextId FROM acore_world.item_template WHERE entry >= $($script:AcItemCustomStart);"
+    $rows = @(Invoke-AcMySqlQuery $Paths $sql 'acore_world')
+    $n = $script:AcItemCustomStart
+    if ($rows.Count -gt 0) { [void][int]::TryParse([string]$rows[0].nextId, [ref]$n) }
+    if ($n -lt $script:AcItemCustomStart) { $n = $script:AcItemCustomStart }
+    return $n
+}
+
+function Copy-AcItem {
+    <#
+      Legt einen neuen Gegenstand als vollstaendige Kopie einer Vorlage an - auch
+      die Felder, die der Editor nicht zeigt. Bewusst als EINE Anweisung:
+      temporaere Tabellen leben nur in ihrer Sitzung, und jeder Aufruf startet
+      eine eigene.
+    #>
+    param($Paths, [int]$SourceEntry, [int]$NewEntry, [string]$NewName)
+    $check = @(Invoke-AcMySqlQuery $Paths "SELECT entry AS itemId FROM acore_world.item_template WHERE entry = $NewEntry;" 'acore_world')
+    if ($check.Count -gt 0) { throw (T 'item.entryTaken' @($NewEntry)) }
+
+    $cols = @(Invoke-AcMySqlQuery $Paths "SELECT COLUMN_NAME AS colName FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = 'acore_world' AND TABLE_NAME = 'item_template' ORDER BY ORDINAL_POSITION;" 'acore_world' |
+              ForEach-Object { [string]$_.colName })
+    if ($cols.Count -eq 0) { throw (T 'item.noColumns') }
+
+    $names = @(); $values = @()
+    foreach ($c in $cols) {
+        $names += ('`' + $c + '`')
+        if ($c -eq 'entry')     { $values += [string]$NewEntry }
+        elseif ($c -eq 'name')  { $values += ("'" + (ConvertTo-AcSqlString $NewName) + "'") }
+        else                    { $values += ('`' + $c + '`') }
+    }
+    $sql = "INSERT INTO acore_world.item_template (" + ($names -join ', ') + ") SELECT " + ($values -join ', ') +
+           " FROM acore_world.item_template WHERE entry = $SourceEntry;"
+    Invoke-AcMySqlExec $Paths $sql 'acore_world'
+
+    Write-AcLog (T 'item.copied' @($SourceEntry, $NewEntry, $NewName))
+    Register-AcItemEdit $Paths $NewEntry
+    return $NewEntry
+}
+
+function Remove-AcItem {
+    param($Paths, [int]$Entry)
+    if ($Entry -lt $script:AcItemCustomStart) { throw (T 'item.onlyCustom' @($script:AcItemCustomStart)) }
+    Invoke-AcMySqlExec $Paths "DELETE FROM acore_world.item_template WHERE entry = $Entry;" 'acore_world'
+    Unregister-AcItemEdit $Paths $Entry
+    Write-AcLog (T 'item.removed' @($Entry))
+}
+
+# --- Sicherung der Aenderungen --------------------------------------------
+
+function Get-AcItemEditFile { param($Paths) return (Join-Path $Paths.Root 'item-edits.json') }
+
+function Get-AcItemEdits {
+    param($Paths)
+    $f = Get-AcItemEditFile $Paths
+    if (-not (Test-Path $f)) { return @() }
+    try { return @((Get-Content $f -Raw -Encoding UTF8 | ConvertFrom-Json).entries | Where-Object { $_ }) } catch { return @() }
+}
+
+function Register-AcItemEdit {
+    # merkt sich, welche Gegenstaende der Manager veraendert hat
+    param($Paths, [int]$Entry)
+    $list = @(Get-AcItemEdits $Paths)
+    if ($list -notcontains $Entry) { $list += $Entry }
+    $json = @{ entries = @($list | Sort-Object) } | ConvertTo-Json -Depth 3
+    [IO.File]::WriteAllText((Get-AcItemEditFile $Paths), $json, (New-Object Text.UTF8Encoding($false)))
+}
+
+function Unregister-AcItemEdit {
+    param($Paths, [int]$Entry)
+    $list = @(Get-AcItemEdits $Paths | Where-Object { [int]$_ -ne $Entry })
+    $json = @{ entries = @($list | Sort-Object) } | ConvertTo-Json -Depth 3
+    [IO.File]::WriteAllText((Get-AcItemEditFile $Paths), $json, (New-Object Text.UTF8Encoding($false)))
+}
+
+function Export-AcItemEdits {
+    <#
+      Schreibt alle veraenderten und neu angelegten Gegenstaende als SQL in den
+      Ordner, den der Datenbank-Updater von AzerothCore selbst einliest. Dadurch
+      ueberstehen die Anpassungen ein Update der Weltdatenbank.
+    #>
+    param($Paths)
+    $entries = @(Get-AcItemEdits $Paths | ForEach-Object { [int]$_ } | Sort-Object)
+    $dir = Join-Path $Paths.Source 'data\sql\custom\db_world'
+    if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+    $file = Join-Path $dir 'item_template_manager.sql'
+    if ($entries.Count -eq 0) {
+        if (Test-Path $file) { Remove-Item $file -Force }
+        return @{ File = $file; Count = 0 }
+    }
+
+    # Zeilen als vollstaendige REPLACE-Anweisungen sichern
+    $cols = @(Invoke-AcMySqlQuery $Paths "SELECT COLUMN_NAME AS colName FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = 'acore_world' AND TABLE_NAME = 'item_template' ORDER BY ORDINAL_POSITION;" 'acore_world' |
+              ForEach-Object { [string]$_.colName })
+    $colList = ($cols | ForEach-Object { '`' + $_ + '`' }) -join ', '
+    $sb = New-Object Text.StringBuilder
+    [void]$sb.AppendLine("-- Von AzerothCore Server Manager erzeugt: " + (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))
+    [void]$sb.AppendLine("-- Enthaelt alle mit dem Gegenstands-Editor geaenderten Eintraege.")
+    [void]$sb.AppendLine("-- Diese Datei wird bei jeder Aenderung neu geschrieben - nicht von Hand bearbeiten.")
+    [void]$sb.AppendLine()
+    foreach ($e in $entries) {
+        $rows = @(Invoke-AcMySqlQuery $Paths ("SELECT " + $colList + " FROM acore_world.item_template WHERE entry = $e;") 'acore_world')
+        if ($rows.Count -eq 0) { continue }
+        $r = $rows[0]
+        $vals = @()
+        foreach ($c in $cols) {
+            $v = [string]$r.$c
+            if ($v -eq '') { $vals += "''" }
+            elseif ($v -match '^-?\d+$') { $vals += $v }
+            elseif ($v -match '^-?\d+\.\d+$') { $vals += $v }
+            else { $vals += "'" + (ConvertTo-AcSqlString $v) + "'" }
+        }
+        [void]$sb.AppendLine("REPLACE INTO ``item_template`` ($colList) VALUES (" + ($vals -join ', ') + ");")
+    }
+    [IO.File]::WriteAllText($file, $sb.ToString(), (New-Object Text.UTF8Encoding($false)))
+    Write-AcLog (T 'item.exported' @($entries.Count, $file))
+    return @{ File = $file; Count = $entries.Count }
 }

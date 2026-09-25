@@ -77,7 +77,7 @@ $script:AcWingetPackages = @{
 # ---------------------------------------------------------------------
 #  Logging / Fortschritt (GUI haengt sich hier ein)
 # ---------------------------------------------------------------------
-$script:AcToolsVersion = '2026-09-06.94'   # wird im Manager (Titel/Info) angezeigt
+$script:AcToolsVersion = '2026-09-06.98'   # wird im Manager (Titel/Info) angezeigt
 $script:AcUserAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36'
 $script:AcLogHandler      = $null
 $script:AcProgressHandler = $null

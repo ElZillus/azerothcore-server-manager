@@ -17,7 +17,7 @@ try {
 }
 # Der Manager traegt seine eigene Version und vergleicht sie mit AC.Common.
 # So faellt sofort auf, wenn nur ein Teil der Dateien ersetzt wurde.
-$script:AcManagerVersion = '2026-09-06.94'
+$script:AcManagerVersion = '2026-09-06.98'
 if (-not (Get-Command Get-AcPaths -ErrorAction SilentlyContinue)) {
     [Windows.Forms.MessageBox]::Show("AC.Common.ps1 in $PSScriptRoot is incomplete or outdated.", 'AzerothCore Server Manager', 'OK', 'Error') | Out-Null
     exit 1
@@ -449,6 +449,26 @@ function Show-AcError {
     [Windows.Forms.MessageBox]::Show($dlgText, (T 'word.error'), 'OK', 'Error') | Out-Null
 }
 
+
+function Show-InputDialog {
+    # kleine Eingabeaufforderung mit Text, Vorgabe und OK/Abbrechen
+    param([string]$Title, [string]$Prompt, [string]$Default = '')
+    $dlg = New-Object Windows.Forms.Form
+    $dlg.Text = $Title; $dlg.Size = New-Object Drawing.Size(520, 240)
+    $dlg.StartPosition = 'CenterParent'; $dlg.FormBorderStyle = 'FixedDialog'
+    $dlg.MinimizeBox = $false; $dlg.MaximizeBox = $false; $dlg.Font = $form.Font
+    $lbl = New-Lbl $Prompt 16 16 470 $false; $lbl.Size = New-Object Drawing.Size(470, 90)
+    $txt = New-Object Windows.Forms.TextBox
+    $txt.Location = New-Object Drawing.Point(16, 112); $txt.Size = New-Object Drawing.Size(470, 26); $txt.Text = $Default
+    $ok = New-Btn 'OK' 246 152 120 32; $ok.DialogResult = 'OK'; $ok.Tag = 'primary'
+    $no = New-Btn (T 'btn.cancel') 376 152 110 32; $no.DialogResult = 'Cancel'
+    $dlg.Controls.AddRange(@($lbl, $txt, $ok, $no))
+    $dlg.AcceptButton = $ok; $dlg.CancelButton = $no
+    Update-AcTheme $dlg
+    if ($dlg.ShowDialog($form) -ne 'OK') { return '' }
+    return $txt.Text.Trim()
+}
+
 function Reset-Title { $form.Text = (T 'app.manager') + " $($script:AcToolsVersion)  -  $($script:P.Root)  [$($script:S.Variant)]" }
 
 # ---------------------------------------------------------------------
@@ -697,7 +717,7 @@ $script:TabsLocked = $false
 function Set-TabsLocked([bool]$Locked) {
     # Waehrend Update/Build bleibt nur der Update-Tab bedienbar
     $script:TabsLocked = $Locked
-    foreach ($t in @($tabServer, $tabCfg, $tabMod, $tabChar, $tabGm, $tabInfo)) {
+    foreach ($t in @($tabServer, $tabCfg, $tabMod, $tabChar, $tabGm, $tabItems, $tabInfo)) {
         try { $t.Enabled = -not $Locked } catch {}
     }
     if ($Locked) { $tabs.SelectedTab = $tabUpdate }
@@ -2256,6 +2276,240 @@ function Show-ItemPickerDialog {
 }
 
 
+
+# ===================== Tab: Gegenstaende =====================
+$tabItems = New-Object Windows.Forms.TabPage
+$tabItems.Text = 'Items'; $tabItems.Padding = New-Object Windows.Forms.Padding(8)
+$tabs.TabPages.Add($tabItems)
+$tabs.TabPages.Remove($tabInfo)
+$tabs.TabPages.Add($tabInfo)
+
+$btnItemReload = New-Btn 'Reload list' 12 12 150 30
+$lblItemSearch = New-Lbl 'Search:' 176 18 200 $true
+$txtItemSearch = New-Object Windows.Forms.TextBox
+$txtItemSearch.Location = New-Object Drawing.Point(380, 14); $txtItemSearch.Size = New-Object Drawing.Size(260, 26)
+$lblItemInfo = New-Lbl '' 12 48 900 $false; $lblItemInfo.ForeColor = 'DarkRed'
+
+$lvItems = New-Object Windows.Forms.ListView
+$lvItems.View = 'Details'; $lvItems.FullRowSelect = $true; $lvItems.HideSelection = $false
+$lvItems.Location = New-Object Drawing.Point(12, 72); $lvItems.Size = New-Object Drawing.Size(460, 400)
+foreach ($c in @(@('item.colEntry', 80), @('item.colName', 220), @('item.colQuality', 80), @('item.colLevel', 60))) {
+    [void]$lvItems.Columns.Add((T $c[0]), $c[1])
+}
+
+# Feldtabelle: links der Feldname, rechts der Wert
+$gridItem = New-Object Windows.Forms.DataGridView
+$gridItem.Location = New-Object Drawing.Point(484, 72); $gridItem.Size = New-Object Drawing.Size(700, 360)
+$gridItem.AllowUserToAddRows = $false; $gridItem.AllowUserToDeleteRows = $false
+$gridItem.RowHeadersVisible = $false; $gridItem.SelectionMode = 'FullRowSelect'
+$gridItem.AutoSizeColumnsMode = 'Fill'; $gridItem.MultiSelect = $false
+[void]$gridItem.Columns.Add('fld', (T 'item.colField'))
+[void]$gridItem.Columns.Add('val', (T 'item.colValue'))
+$gridItem.Columns[0].ReadOnly = $true
+$gridItem.Columns[0].FillWeight = 45; $gridItem.Columns[1].FillWeight = 55
+
+$txtItemHint = New-Object Windows.Forms.TextBox
+$txtItemHint.Multiline = $true; $txtItemHint.ReadOnly = $true; $txtItemHint.ScrollBars = 'Vertical'
+$txtItemHint.Location = New-Object Drawing.Point(484, 440); $txtItemHint.Size = New-Object Drawing.Size(700, 60)
+
+$btnItemSave = New-Btn 'Save changes' 484 508 190 32; $btnItemSave.Tag = 'primary'
+$btnItemCopy = New-Btn 'Copy as new item...' 682 508 210 32
+$btnItemDel  = New-Btn 'Delete custom item' 900 508 190 32
+$btnItemSql  = New-Btn 'Save as SQL' 12 508 190 32
+
+$tabItems.Controls.AddRange(@($btnItemReload, $lblItemSearch, $txtItemSearch, $lblItemInfo,
+                              $lvItems, $gridItem, $txtItemHint,
+                              $btnItemSave, $btnItemCopy, $btnItemDel, $btnItemSql))
+
+$script:ItemList = @()
+$script:CurrentItem = $null
+$script:CurrentItemEntry = 0
+
+$layoutItems = {
+    $w = $tabItems.ClientSize.Width; $h = $tabItems.ClientSize.Height
+    $listW = [Math]::Max(380, [int]($w * 0.36))
+    $txtItemSearch.Location = New-Object Drawing.Point(380, 14)
+    $txtItemSearch.Size = New-Object Drawing.Size([Math]::Max(160, $listW - 368), 26)
+    $lvItems.Location = New-Object Drawing.Point(12, 72)
+    $lvItems.Size = New-Object Drawing.Size($listW, ($h - 130))
+    if ($lvItems.Columns.Count -ge 4) {
+        $free = $listW - 24
+        $lvItems.Columns[0].Width = [int]($free * 0.16)
+        $lvItems.Columns[1].Width = [int]($free * 0.52)
+        $lvItems.Columns[2].Width = [int]($free * 0.18)
+        $lvItems.Columns[3].Width = [int]($free * 0.14)
+    }
+    $lblItemInfo.Size = New-Object Drawing.Size(($w - 24), 20)
+    $btnItemSql.Location = New-Object Drawing.Point(12, ($h - 46))
+
+    $rx = $listW + 24
+    $rw = [Math]::Max(360, $w - $rx - 12)
+    $gridItem.Location = New-Object Drawing.Point($rx, 72)
+    $gridItem.Size = New-Object Drawing.Size($rw, [Math]::Max(180, $h - 214))
+    $txtItemHint.Location = New-Object Drawing.Point($rx, ($h - 134))
+    $txtItemHint.Size = New-Object Drawing.Size($rw, 76)
+    $bw = [int](($rw - 24) / 3)
+    $btnItemSave.Location = New-Object Drawing.Point($rx, ($h - 46))
+    $btnItemSave.Size = New-Object Drawing.Size($bw, 32)
+    $btnItemCopy.Location = New-Object Drawing.Point(($rx + $bw + 12), ($h - 46))
+    $btnItemCopy.Size = New-Object Drawing.Size($bw, 32)
+    $btnItemDel.Location = New-Object Drawing.Point(($rx + 2 * $bw + 24), ($h - 46))
+    $btnItemDel.Size = New-Object Drawing.Size($bw, 32)
+}
+$tabItems.Add_Resize($layoutItems)
+
+
+function Ensure-ItemDb {
+    # startet MySQL bei Bedarf - die Zustimmung allein startet den Dienst nicht
+    if (Test-AcMySqlAlive $script:P) { return $true }
+    try {
+        Set-Status $lblMy 'svc.mysql' 'state.starting'
+        $lblItemInfo.ForeColor = Get-AcColor 'TextDim'
+        $lblItemInfo.Text = T 'chr.dbNotRunning'
+        Invoke-AcDoEvents
+        $st = Start-AcMySql $script:P
+        if ($st) { $script:MySql = $st }
+        Set-Status $lblMy 'svc.mysql' 'state.running'
+        return $true
+    } catch {
+        Show-AcError $_ 'Items'
+        return $false
+    }
+}
+
+function Refresh-ItemList {
+    if (-not (Confirm-DbStart 'db.reasonItems')) { $lblItemInfo.Text = T 'db.notStarted'; return }
+    if (-not (Ensure-ItemDb)) { $lblItemInfo.Text = T 'db.notStarted'; return }
+    try {
+        $lblItemInfo.ForeColor = Get-AcColor 'TextDim'
+        $lblItemInfo.Text = T 'chr.loading'
+        Invoke-AcDoEvents
+        $script:ItemList = @(Find-AcItems $script:P $txtItemSearch.Text)
+        $lvItems.Items.Clear()
+        foreach ($it in $script:ItemList) {
+            $row = New-Object Windows.Forms.ListViewItem([string]$it.Entry)
+            [void]$row.SubItems.Add([string]$it.Name)
+            [void]$row.SubItems.Add([string]$it.Quality)
+            [void]$row.SubItems.Add([string]$it.ItemLevel)
+            $row.ForeColor = Get-AcQualityColor ([int]$it.Quality)
+            $row.Tag = $it.Entry
+            [void]$lvItems.Items.Add($row)
+        }
+        $lblItemInfo.Text = T 'item.cacheHint'
+    } catch {
+        Show-AcError $_ 'Items'
+        $lblItemInfo.ForeColor = Get-AcColor 'Bad'
+        $lblItemInfo.Text = $_.Exception.Message
+    }
+}
+
+function Load-ItemFields([int]$Entry) {
+    $script:CurrentItem = Get-AcItem $script:P $Entry
+    $script:CurrentItemEntry = $Entry
+    $gridItem.Rows.Clear()
+    if (-not $script:CurrentItem) { return }
+    $lastGroup = ''
+    foreach ($f in $script:AcItemFields) {
+        $k = [string]$f.Key
+        if ($f.Group -ne $lastGroup) {
+            # Gruppenzeile als Trenner, nicht bearbeitbar
+            $gi = $gridItem.Rows.Add(('--- ' + (T ('item.group.' + $f.Group)) + ' ---'), '')
+            $gridItem.Rows[$gi].ReadOnly = $true
+            $gridItem.Rows[$gi].DefaultCellStyle.ForeColor = Get-AcColor 'Accent'
+            $gridItem.Rows[$gi].Tag = ''
+            $lastGroup = [string]$f.Group
+        }
+        # sprechender Name in der Tabelle, technischer Name nur im Hilfetext
+        $label = T ('item.f.' + $k)
+        if (-not $label -or $label -eq ('item.f.' + $k)) { $label = $k }
+        $i = $gridItem.Rows.Add($label, [string]$script:CurrentItem[$k])
+        $gridItem.Rows[$i].Tag = $k
+    }
+}
+
+$lvItems.Add_SelectedIndexChanged({
+    if ($lvItems.SelectedItems.Count -eq 0) { return }
+    try { Load-ItemFields ([int]$lvItems.SelectedItems[0].Tag) } catch { Show-AcError $_ 'Items' }
+})
+
+$gridItem.Add_SelectionChanged({
+    # Hilfetext zum gewaehlten Feld anzeigen
+    try {
+        $txtItemHint.Text = ''
+        if (-not $gridItem.CurrentRow) { return }
+        $key = [string]$gridItem.CurrentRow.Tag
+        if (-not $key) { return }
+        $def = $script:AcItemFields | Where-Object { $_.Key -eq $key } | Select-Object -First 1
+        $lines = @(T 'item.tech' @($key))
+        if ($def -and $def.Hint) { $lines += (T ('item.hint.' + $def.Hint)) }
+        $txtItemHint.Text = ($lines -join "`r`n")
+    } catch { }
+})
+
+$txtItemSearch.Add_KeyDown({ if ($_.KeyCode -eq 'Enter') { $_.SuppressKeyPress = $true; Refresh-ItemList } })
+$btnItemReload.Add_Click({ Refresh-ItemList })
+
+$btnItemSave.Add_Click({
+    if (-not (Ensure-ItemDb)) { return }
+    if (-not $script:CurrentItem -or $script:CurrentItemEntry -le 0) {
+        [Windows.Forms.MessageBox]::Show((T 'item.noSelection')) | Out-Null; return
+    }
+    try {
+        $fields = @{}
+        foreach ($row in $gridItem.Rows) {
+            $k = [string]$row.Tag
+            if (-not $k) { continue }
+            $new = [string]$row.Cells[1].Value
+            if ($new -ne [string]$script:CurrentItem[$k]) { $fields[$k] = $new }
+        }
+        if ($fields.Count -eq 0) { [Windows.Forms.MessageBox]::Show((T 'item.noChanges')) | Out-Null; return }
+        $n = Save-AcItem $script:P $script:CurrentItemEntry $fields
+        Export-AcItemEdits $script:P | Out-Null
+        Load-ItemFields $script:CurrentItemEntry
+        Refresh-ItemList
+        [Windows.Forms.MessageBox]::Show((T 'item.savedMsg' @($n, "`r`n")), (T 'tab.items'), 'OK', 'Information') | Out-Null
+    } catch { Show-AcError $_ 'Items' }
+})
+
+$btnItemCopy.Add_Click({
+    if (-not (Ensure-ItemDb)) { return }
+    if ($script:CurrentItemEntry -le 0) { [Windows.Forms.MessageBox]::Show((T 'item.noSelection')) | Out-Null; return }
+    try {
+        $next = Get-AcNextItemEntry $script:P
+        $srcName = [string]$script:CurrentItem['name']
+        $name = Show-InputDialog (T 'item.copy') (T 'item.copyAsk' @($srcName, $script:CurrentItemEntry, $next, "`r`n")) ($srcName + ' (Copy)')
+        if (-not $name) { return }
+        $newEntry = Copy-AcItem $script:P $script:CurrentItemEntry $next $name
+        Export-AcItemEdits $script:P | Out-Null
+        $txtItemSearch.Clear()
+        Refresh-ItemList
+        [Windows.Forms.MessageBox]::Show((T 'item.copyDone' @($name, $newEntry, "`r`n")), (T 'tab.items'), 'OK', 'Information') | Out-Null
+    } catch { Show-AcError $_ 'Items' }
+})
+
+$btnItemDel.Add_Click({
+    if (-not (Ensure-ItemDb)) { return }
+    if ($script:CurrentItemEntry -le 0) { [Windows.Forms.MessageBox]::Show((T 'item.noSelection')) | Out-Null; return }
+    try {
+        $name = [string]$script:CurrentItem['name']
+        $ask = T 'item.deleteAsk' @($script:CurrentItemEntry, $name, "`r`n")
+        if ([Windows.Forms.MessageBox]::Show($ask, (T 'tab.items'), 'YesNo', 'Warning') -ne 'Yes') { return }
+        Remove-AcItem $script:P $script:CurrentItemEntry
+        Export-AcItemEdits $script:P | Out-Null
+        $script:CurrentItem = $null; $script:CurrentItemEntry = 0
+        $gridItem.Rows.Clear()
+        Refresh-ItemList
+    } catch { Show-AcError $_ 'Items' }
+})
+
+$btnItemSql.Add_Click({
+    if (-not (Ensure-ItemDb)) { return }
+    try {
+        $r = Export-AcItemEdits $script:P
+        [Windows.Forms.MessageBox]::Show((T 'item.exportedMsg' @($r.Count, $r.File, "`r`n")), (T 'tab.items'), 'OK', 'Information') | Out-Null
+    } catch { Show-AcError $_ 'Items' }
+})
+
 # ---------------------------------------------------------------------
 #  Tab "GM-Befehle": Befehlsliste des aktuell gebauten Servers
 # ---------------------------------------------------------------------
@@ -2452,6 +2706,14 @@ $applyTexts = {
     if (-not (Test-WorldStopped)) { $lblCharWarn.Text = T 'chr.serverRunning' }
     # GM-Befehle
     if ($tabs.TabPages.Contains($tabGm)) { $tabGm.Text = T 'tab.gm' }
+    if ($tabs.TabPages.Contains($tabItems)) {
+        $tabItems.Text = T 'tab.items'
+        $btnItemReload.Text = T 'item.reload'; $lblItemSearch.Text = T 'item.search'
+        $btnItemSave.Text = T 'item.save'; $btnItemCopy.Text = T 'item.copy'
+        $btnItemDel.Text = T 'item.delete'; $btnItemSql.Text = T 'item.exportSql'
+        foreach ($i in 0..3) { $lvItems.Columns[$i].Text = (T (@('item.colEntry', 'item.colName', 'item.colQuality', 'item.colLevel')[$i])) }
+        $gridItem.Columns[0].HeaderText = T 'item.colField'; $gridItem.Columns[1].HeaderText = T 'item.colValue'
+    }
     $btnGmReload.Text = T 'chr.reload'; $lblGmSearch.Text = T 'chr.search'
     $lblGmLevel.Text = T 'gm.level'; $btnGmCopy.Text = T 'gm.copy'; $btnGmSend.Text = T 'gm.send'
     foreach ($i in 0..2) { $lvGm.Columns[$i].Text = (T (@('gm.colCommand', 'gm.colSecurity', 'gm.colHelp')[$i])) }
@@ -2665,7 +2927,7 @@ $fillInfoTab = {
 #  Start / Ende
 # ---------------------------------------------------------------------
 $tabs.Add_SelectedIndexChanged({
-    foreach ($lay in @($layoutServer, $layoutUpdate, $layoutCfg, $layoutMod, $layoutChar, $layoutGm)) { & $lay }
+    foreach ($lay in @($layoutServer, $layoutUpdate, $layoutCfg, $layoutMod, $layoutChar, $layoutGm, $layoutItems)) { & $lay }
     if ($script:Busy -or $script:DbBusy) { return }
     # Datenbankabhaengige Tabs: bei jedem Oeffnen fragen, solange MySQL nicht laeuft
     if ($tabs.SelectedTab -eq $tabChar) {
@@ -2675,11 +2937,13 @@ $tabs.Add_SelectedIndexChanged({
             if ($tabs.SelectedTab -eq $tabChar) { Refresh-CharList }
         } else { $lblCharWarn.ForeColor = 'DarkRed'; $lblCharWarn.Text = T 'db.notStarted' }
     }
+    if ($tabs.SelectedTab -eq $tabItems -and $lvItems.Items.Count -eq 0) { Refresh-ItemList }
     if ($tabs.SelectedTab -eq $tabGm) {
         if (Test-AcMySqlAlive $script:P) {
             if ($script:GmCommands.Count -eq 0) { Refresh-GmCommands }
         } elseif (Confirm-DbStart 'db.reasonGm') {
-            if ($tabs.SelectedTab -eq $tabGm) { Refresh-GmCommands }
+            if ($tabs.SelectedTab -eq $tabItems -and $lvItems.Items.Count -eq 0) { Refresh-ItemList }
+    if ($tabs.SelectedTab -eq $tabGm) { Refresh-GmCommands }
         } else { $lblGmHint.ForeColor = 'DarkRed'; $lblGmHint.Text = T 'db.notStarted' }
     }
 })
@@ -2688,7 +2952,7 @@ $form.Add_Shown({
     # auftrat, statt nur "Argumenttypen stimmen nicht ueberein" zu melden
     $steps = @(
         @{ Name = 'Theme';   Do = { Update-AcTheme $form $script:S.Theme } }
-        @{ Name = 'Layout';  Do = { foreach ($lay in @($layoutServer, $layoutUpdate, $layoutCfg, $layoutMod, $layoutChar, $layoutGm)) { & $lay } } }
+        @{ Name = 'Layout';  Do = { foreach ($lay in @($layoutServer, $layoutUpdate, $layoutCfg, $layoutMod, $layoutChar, $layoutGm, $layoutItems)) { & $lay } } }
         @{ Name = 'Texts';   Do = { & $applyTexts } }
         @{ Name = 'Configs'; Do = { Load-ConfFiles } }
         @{ Name = 'Modules'; Do = { Refresh-Modules } }

@@ -4,7 +4,7 @@
 #  Update-AcTheme faerbt ein Fenster samt aller Unterelemente ein.
 # =====================================================================
 
-$script:AcThemeVersion = '2026-09-06.94'
+$script:AcThemeVersion = '2026-09-06.98'
 
 $script:AcThemes = @{
     light = @{
